@@ -1,0 +1,896 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>내 작업대</title>
+<meta name="description" content="일정, 할 일, 메모, 바로가기를 한 곳에 모으는 개인 작업대">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#EDF0F3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="작업대">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: 책상 위 플래너. 위에 오늘 날짜와 요약, 아래는 2열(일정·할 일 / 메모·바로가기), 좁은 화면에서는 1열. */
+:root {
+  --bg: #EDF0F3;
+  --surface: #FFFFFF;
+  --surface-2: #F5F7F9;
+  --ink: #131B24;
+  --muted: #586573;
+  --line: #D8DEE5;
+  --accent: #0B6E64;
+  --accent-ink: #FFFFFF;
+  --warn: #B42318;
+  --warn-soft: #FCE9E7;
+  --today: #9A4F00;
+  --today-soft: #FFF0DC;
+  --font-body: "IBM Plex Sans KR", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Consolas, "Courier New", monospace;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0E1317; --surface: #161D23; --surface-2: #1C252C; --ink: #E7ECF0; --muted: #97A4B0; --line: #2A353E;
+    --accent: #4DBFAE; --accent-ink: #06201C;
+    --warn: #F28B80; --warn-soft: #3A1D1A; --today: #F2B35E; --today-soft: #33250F;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { background: var(--bg); }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.5; -webkit-text-size-adjust: 100%; }
+input, textarea, button { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.wrap {
+  max-width: 1180px; margin: 0 auto;
+  padding-top: max(24px, env(safe-area-inset-top, 0px));
+  padding-bottom: max(56px, env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+
+/* 상단 */
+.top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; margin-bottom: 18px; }
+.date-big { margin: 0; font-size: clamp(1.9rem, 5.5vw, 2.7rem); font-weight: 700; letter-spacing: -0.03em; line-height: 1.1; text-wrap: balance; }
+.date-big span { margin-left: 0.45em; color: var(--muted); font-weight: 500; }
+.summary { margin: 8px 0 0; color: var(--muted); }
+.summary b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.summary b.warn { color: var(--warn); }
+.tools { display: flex; align-items: center; gap: 8px; }
+.sync { display: inline-flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); font: 500 12px var(--font-mono); }
+.sync i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.sync[data-state="ok"] i { background: var(--accent); }
+.sync[data-state="wait"] i { background: var(--today); }
+.sync[data-state="err"] i { background: var(--warn); }
+
+/* 레이아웃 */
+.grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+@media (min-width: 900px) { .grid { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); align-items: start; } }
+.col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+
+.panel { min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
+.panel > header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 14px 16px 10px; }
+.panel h2 { margin: 0; font-size: 1.0625rem; font-weight: 700; letter-spacing: -0.01em; }
+.count { color: var(--muted); font: 500 12px var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.addbar { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 16px; border-block: 1px solid var(--line); background: var(--surface-2); }
+.addbar .grow { flex: 1 1 220px; min-width: 0; }
+.addbar textarea.grow { flex-basis: 100%; resize: vertical; min-height: 76px; }
+input[type="text"], input[type="password"], input[type="date"], input[type="time"], textarea {
+  min-height: 38px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink);
+}
+input::placeholder, textarea::placeholder { color: var(--muted); opacity: 0.85; }
+input:disabled, textarea:disabled, button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn { min-height: 38px; padding: 8px 16px; border: 1px solid transparent; border-radius: 8px; background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.btn.ghost { border-color: var(--line); background: transparent; color: var(--ink); font-weight: 500; }
+.btn.small { min-height: 30px; padding: 3px 10px; font-size: 13px; }
+.btn.quiet { min-height: 30px; padding: 3px 8px; border: 0; background: transparent; color: var(--muted); font-size: 13px; font-weight: 500; }
+.btn.quiet:hover:not(:disabled) { color: var(--ink); }
+.btn.quiet.del:hover:not(:disabled) { color: var(--warn); }
+
+.empty { margin: 0; padding: 18px 16px; color: var(--muted); }
+
+/* 목록 행 */
+.row { display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; border-top: 1px solid var(--line); }
+.row:hover { background: var(--surface-2); }
+.title-btn { flex: 1 1 auto; min-width: 0; padding: 2px 0; border: 0; background: none; text-align: left; overflow-wrap: anywhere; cursor: text; }
+input.inline { flex: 1 1 auto; min-width: 0; }
+.time { flex: none; width: 3.4em; color: var(--muted); font: 500 13px var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.day-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px 6px; color: var(--muted); font: 600 12px var(--font-mono); }
+.day-head .rel { padding: 1px 8px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); font-weight: 500; }
+.day-head.today { color: var(--today); }
+.day-head.today .rel { background: var(--today-soft); border-color: transparent; color: var(--today); }
+.day-head + .row { border-top: 0; }
+
+.task input[type="checkbox"] { flex: none; width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+.task.done .title-btn { color: var(--muted); text-decoration: line-through; }
+.chip { flex: none; padding: 1px 8px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); color: var(--muted); font: 500 12px var(--font-mono); }
+.chip.warn { border-color: transparent; background: var(--warn-soft); color: var(--warn); }
+.chip.today { border-color: transparent; background: var(--today-soft); color: var(--today); }
+
+details > summary { padding: 10px 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; cursor: pointer; }
+
+/* 메모 */
+.notes { display: flex; flex-direction: column; gap: 10px; padding: 12px 16px 16px; }
+.notes .empty { padding: 4px 0; }
+.note { border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); padding: 12px 14px; }
+.note.pinned { border-color: var(--accent); }
+.note h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; font-size: 0.9375rem; font-weight: 600; overflow-wrap: anywhere; }
+.pin { flex: none; padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 11px; font-weight: 500; }
+.note .body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.note .body a { color: var(--accent); text-underline-offset: 2px; }
+.note .actions { display: flex; flex-wrap: wrap; gap: 2px; margin: 8px -8px -6px; }
+.note .edit { display: flex; flex-direction: column; gap: 8px; }
+.note .edit textarea { min-height: 120px; resize: vertical; }
+.note .edit .actions { margin: 0; gap: 8px; }
+
+/* 바로가기 */
+.links { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px 16px; }
+.links .empty { padding: 4px 0; }
+.link { display: inline-flex; align-items: stretch; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); overflow: hidden; }
+.link a { display: flex; flex-direction: column; min-width: 0; padding: 6px 12px; color: var(--ink); text-decoration: none; }
+.link a b { font-weight: 600; overflow-wrap: anywhere; }
+.link a small { color: var(--muted); font: 400 12px var(--font-mono); overflow-wrap: anywhere; }
+.link a:hover b { color: var(--accent); }
+.link button { border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--muted); padding: 0 10px; }
+.link button:hover { color: var(--warn); }
+
+/* 연결 설정 */
+.setup { margin-bottom: 20px; }
+.setup-body { display: flex; flex-direction: column; gap: 12px; padding: 0 16px 16px; }
+.setup-body p { margin: 0; }
+.steps { display: flex; flex-direction: column; gap: 8px; margin: 0; padding-left: 1.3em; }
+.steps ul { margin: 6px 0 0; padding-left: 1.1em; color: var(--muted); }
+.steps a { color: var(--accent); }
+code { padding: 1px 5px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface-2); font: 500 12px var(--font-mono); overflow-wrap: anywhere; }
+#cfg-form { display: flex; flex-direction: column; gap: 6px; max-width: 520px; }
+#cfg-form label { font-size: 13px; font-weight: 600; }
+#cfg-form .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.hint { color: var(--muted); font-size: 13px; }
+.hint.err { color: var(--warn); }
+
+/* 알림 */
+.toast { position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 10; display: flex; align-items: center; gap: 14px; max-width: calc(100% - 32px); padding: 10px 14px; border-radius: 10px; background: var(--ink); color: var(--bg); transform: translateX(-50%); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25); }
+.toast button { padding: 0; border: 0; background: none; color: inherit; font-weight: 700; text-decoration: underline; }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<noscript>이 페이지는 자바스크립트가 필요해요.</noscript>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1 class="date-big" id="date-big"></h1>
+      <p class="summary" id="summary">불러오는 중…</p>
+    </div>
+    <div class="tools">
+      <button class="sync" id="sync" type="button" data-state="wait" title="눌러서 지금 동기화"><i></i><span id="sync-text">연결 전</span></button>
+      <button class="btn ghost small" id="open-setup" type="button">설정</button>
+    </div>
+  </header>
+
+  <section class="panel setup" id="setup" aria-labelledby="h-setup" hidden>
+    <header><h2 id="h-setup">GitHub 연결</h2></header>
+    <div class="setup-body">
+      <p>일정과 메모는 내 GitHub의 <b>비공개 저장소</b>에 저장돼요. 기기마다 한 번만 연결하면 됩니다.</p>
+      <ol class="steps">
+        <li><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">GitHub에서 열쇠 만들기</a>를 열어요.
+          <ul>
+            <li><b>Repository access</b>는 <b>Only select repositories</b>로 하고, 데이터 저장소 하나만 골라요.</li>
+            <li><b>Repository permissions</b>에서 <b>Contents</b>를 <b>Read and write</b>로 해요.</li>
+            <li>만들면 나오는 <code>github_pat_…</code> 문자열을 복사해요. 한 번만 보여요.</li>
+          </ul>
+        </li>
+        <li>아래에 저장소 이름과 열쇠를 붙여 넣어요.</li>
+      </ol>
+      <form id="cfg-form" autocomplete="off">
+        <label for="cfg-repo">저장소 (계정/이름)</label>
+        <input type="text" id="cfg-repo" placeholder="계정/저장소이름" autocapitalize="off" autocorrect="off" spellcheck="false" required>
+        <label for="cfg-token">열쇠</label>
+        <input type="password" id="cfg-token" placeholder="github_pat_…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <p class="hint" id="cfg-hint" role="status"></p>
+        <div class="actions">
+          <button class="btn" type="submit" id="cfg-save">연결하고 저장</button>
+          <button class="btn ghost" type="button" id="cfg-close" hidden>닫기</button>
+          <button class="btn ghost" type="button" id="cfg-clear" hidden>이 기기에서 열쇠 지우기</button>
+        </div>
+      </form>
+      <p class="hint">열쇠와 데이터 사본은 이 기기의 브라우저에만 저장돼요. 다른 사람과 같이 쓰는 기기에는 넣지 마세요.</p>
+    </div>
+  </section>
+
+  <main class="grid" id="main">
+    <div class="col">
+      <section class="panel" aria-labelledby="h-events">
+        <header><h2 id="h-events">일정</h2><span class="count" id="c-events"></span></header>
+        <form class="addbar" id="ev-form" autocomplete="off">
+          <label class="sr" for="ev-title">일정 제목</label>
+          <input class="grow" type="text" id="ev-title" placeholder="일정 추가 (예: 거래처 미팅)" maxlength="120" required>
+          <label class="sr" for="ev-date">날짜</label>
+          <input type="date" id="ev-date" required>
+          <label class="sr" for="ev-time">시간 (비우면 종일)</label>
+          <input type="time" id="ev-time">
+          <button class="btn" type="submit">추가</button>
+        </form>
+        <div id="events-list"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="h-tasks">
+        <header><h2 id="h-tasks">할 일</h2><span class="count" id="c-tasks"></span></header>
+        <form class="addbar" id="tk-form" autocomplete="off">
+          <label class="sr" for="tk-title">할 일</label>
+          <input class="grow" type="text" id="tk-title" placeholder="할 일 추가" maxlength="160" required>
+          <label class="sr" for="tk-due">기한 (선택)</label>
+          <input type="date" id="tk-due">
+          <button class="btn" type="submit">추가</button>
+        </form>
+        <div id="tasks-list"></div>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="panel" aria-labelledby="h-notes">
+        <header><h2 id="h-notes">메모</h2><span class="count" id="c-notes"></span></header>
+        <form class="addbar" id="nt-form" autocomplete="off">
+          <label class="sr" for="nt-title">메모 제목 (선택)</label>
+          <input class="grow" type="text" id="nt-title" placeholder="제목 (선택)" maxlength="120">
+          <label class="sr" for="nt-body">메모 내용</label>
+          <textarea class="grow" id="nt-body" placeholder="적어 두고 싶은 내용. 주소(https://…)는 눌러서 열 수 있어요. Ctrl+Enter로 저장" maxlength="20000" required></textarea>
+          <button class="btn" type="submit">메모 저장</button>
+        </form>
+        <div class="notes" id="notes-list"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="h-links">
+        <header><h2 id="h-links">바로가기</h2><span class="count" id="c-links"></span></header>
+        <form class="addbar" id="ln-form" autocomplete="off">
+          <label class="sr" for="ln-label">이름</label>
+          <input type="text" id="ln-label" placeholder="이름 (예: 작업 폴더)" maxlength="40" required style="flex:1 1 140px;min-width:0">
+          <label class="sr" for="ln-url">주소</label>
+          <input class="grow" type="text" id="ln-url" placeholder="주소 (https://…)" maxlength="500" inputmode="url" autocapitalize="off" required>
+          <button class="btn" type="submit">추가</button>
+        </form>
+        <div class="links" id="links-list"></div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+(() => {
+  'use strict';
+
+  const $ = (s, r = document) => r.querySelector(s);
+
+  function el(tag, attrs, ...kids) {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (v == null || v === false) continue;
+      if (k === 'class') n.className = v;
+      else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+      else n.setAttribute(k, v === true ? '' : v);
+    }
+    for (const kid of kids.flat()) {
+      if (kid == null || kid === false) continue;
+      n.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+    }
+    return n;
+  }
+
+  /* ---------- 날짜 ---------- */
+  const DOW = ['일', '월', '화', '수', '목', '금', '토'];
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  const pad = n => String(n).padStart(2, '0');
+  const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const parseYmd = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+  const todayStr = () => ymd(new Date());
+  const diffDays = s => Math.round((parseYmd(s) - parseYmd(todayStr())) / 86400000);
+  const shortDate = s => { const d = parseYmd(s); return `${d.getMonth() + 1}월 ${d.getDate()}일`; };
+  const hhmm = ms => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  function longDate(s) {
+    const d = parseYmd(s);
+    const y = d.getFullYear() !== new Date().getFullYear() ? `${d.getFullYear()}년 ` : '';
+    return `${y}${shortDate(s)} (${DOW[d.getDay()]})`;
+  }
+  function relLabel(s) {
+    const n = diffDays(s);
+    if (n === 0) return '오늘';
+    if (n === 1) return '내일';
+    return n > 1 ? `D-${n}` : `${-n}일 전`;
+  }
+
+  /* ---------- 저장소(브라우저) ---------- */
+  const K = { cfg: 'wb.cfg', remote: 'wb.remote', queue: 'wb.queue' };
+  const load = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
+  const save = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); } catch { /* 저장 공간이 막혀 있어도 화면은 동작한다 */ } };
+
+  /* ---------- 데이터 ---------- */
+  const COLLS = ['events', 'tasks', 'notes', 'links'];
+  const emptyData = () => ({ events: [], tasks: [], notes: [], links: [] });
+  const clone = o => JSON.parse(JSON.stringify(o));
+  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+  function normalize(raw) {
+    const d = emptyData();
+    if (raw && typeof raw === 'object') {
+      for (const c of COLLS) if (Array.isArray(raw[c])) d[c] = raw[c].filter(x => x && typeof x === 'object' && typeof x.id === 'string');
+    }
+    return d;
+  }
+  /* 변경 하나(op)를 데이터에 적용한다. 항목 단위로 덮어쓰고, 삭제는 id로 지운다. */
+  function applyOp(d, op) {
+    const arr = d[op.c];
+    if (!arr) return;
+    const i = arr.findIndex(x => x.id === op.id);
+    if (op.del) { if (i >= 0) arr.splice(i, 1); return; }
+    const item = Object.assign({}, op.item, { id: op.id });
+    if (i >= 0) arr[i] = item; else arr.push(item);
+  }
+
+  let cfg = load(K.cfg, null);              // { repo, token }
+  let remote = load(K.remote, null);        // 마지막으로 받은 저장소 내용 { sha, etag, data }
+  let queue = load(K.queue, []);            // 아직 올리지 못한 변경
+  let loaded = !!remote;
+  if (!remote) remote = { sha: null, etag: null, data: emptyData() };
+  const view = () => { const d = clone(remote.data); queue.forEach(op => applyOp(d, op)); return d; };
+  let data = view();
+
+  function commit(op) {
+    queue.push(op);
+    applyOp(data, op);
+    save(K.queue, queue);
+    render(op.c);
+    showStatus();
+    scheduleSync();
+  }
+  const add = (c, item) => commit({ c, id: uid(), item });
+  function update(c, id, patch) {
+    const cur = data[c].find(x => x.id === id);
+    if (cur) commit({ c, id, item: Object.assign({}, cur, patch) });
+  }
+  function removeItem(c, item) {
+    commit({ c, id: item.id, del: true });
+    toast('삭제했어요.', '되돌리기', () => commit({ c, id: item.id, item }));
+  }
+
+  /* ---------- 알림·상태 ---------- */
+  let toastTimer = null;
+  function toast(msg, actionLabel, action) {
+    const t = $('#toast');
+    t.replaceChildren(el('span', {}, msg));
+    if (actionLabel && action) t.append(el('button', { type: 'button', onclick: () => { t.hidden = true; action(); } }, actionLabel));
+    t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.hidden = true; }, actionLabel ? 7000 : 4500);
+  }
+  function setStatus(state, text) {
+    $('#sync').dataset.state = state;
+    $('#sync-text').textContent = text;
+  }
+
+  /* ---------- GitHub 통신 ---------- */
+  const API = 'https://api.github.com';
+  class WbError extends Error { constructor(kind, detail) { super(detail || kind); this.kind = kind; } }
+  const MSG = {
+    auth: '열쇠가 맞지 않거나 만료됐어요. 새 열쇠를 만들어 붙여 넣어 주세요.',
+    repo: '저장소를 찾을 수 없어요. 이름과, 열쇠가 접근할 수 있는 저장소를 확인해 주세요.',
+    perm: '쓰기 권한이 없어요. 열쇠의 Contents 권한을 "Read and write"로 만들어 주세요.',
+    rate: '요청이 너무 많아요. 잠시 후 다시 시도해 주세요.',
+    public: '이 저장소는 공개 상태예요. 일정과 메모가 모두에게 보이니 비공개 저장소를 쓰세요.',
+    corrupt: '저장소의 data.json을 읽을 수 없어서 덮어쓰지 않았어요. GitHub에서 파일을 확인해 주세요.',
+    net: '인터넷에 연결되지 않았어요.',
+    http: '저장소와 통신하지 못했어요. 잠시 후 다시 시도해 주세요.'
+  };
+  const SHORT = { auth: '열쇠 확인', repo: '저장소 확인', perm: '권한 확인', rate: '잠시 후 재시도', public: '공개 저장소', corrupt: '파일 확인', http: '동기화 오류' };
+
+  async function api(url, opts, token) {
+    const o = opts || {};
+    const headers = Object.assign({ Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' }, o.headers || {});
+    try { return await fetch(url, Object.assign({ cache: 'no-store' }, o, { headers })); }
+    catch { throw new WbError('net'); }
+  }
+  async function fail(res) {
+    let msg = '';
+    try { msg = (await res.json()).message || ''; } catch { /* 본문이 없을 수 있다 */ }
+    if (res.status === 401) return new WbError('auth', msg);
+    if (res.status === 403) {
+      if (res.headers.get('x-ratelimit-remaining') === '0' || /rate limit/i.test(msg)) return new WbError('rate', msg);
+      return new WbError(/not accessible|permission/i.test(msg) ? 'perm' : 'auth', msg);
+    }
+    if (res.status === 404) return new WbError('repo', msg);
+    return new WbError('http', `${res.status} ${msg}`);
+  }
+  async function ghRepoMeta(repo, token) {
+    const res = await api(`${API}/repos/${repo}`, {}, token);
+    if (!res.ok) throw await fail(res);
+    const j = await res.json();
+    return { private: j.private === true };
+  }
+  const b64dec = s => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/\s/g, '')), c => c.charCodeAt(0)));
+  function b64enc(str) {
+    const bytes = new TextEncoder().encode(str);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+  async function ghGet() {
+    const url = `${API}/repos/${cfg.repo}/contents/data.json`;
+    const res = await api(url, { headers: remote.etag ? { 'If-None-Match': remote.etag } : {} }, cfg.token);
+    if (res.status === 304) return { notModified: true };
+    if (res.status === 404) {
+      const m = await api(`${API}/repos/${cfg.repo}`, {}, cfg.token);   // 파일이 없는 건지, 저장소에 못 들어가는 건지 구분
+      if (!m.ok) throw await fail(m);
+      return { sha: null, etag: null, data: emptyData() };
+    }
+    if (!res.ok) throw await fail(res);
+    const j = await res.json();
+    let text = '';
+    if (j.content) text = b64dec(j.content);
+    else if (j.size > 0) {
+      const r2 = await api(url, { headers: { Accept: 'application/vnd.github.raw+json' } }, cfg.token);
+      if (!r2.ok) throw await fail(r2);
+      text = await r2.text();
+    }
+    let parsed = emptyData();
+    if (text.trim()) { try { parsed = normalize(JSON.parse(text)); } catch { throw new WbError('corrupt'); } }
+    return { sha: j.sha, etag: res.headers.get('etag'), data: parsed };
+  }
+  let warnedSize = false;
+  async function ghPut(obj, sha) {
+    const text = JSON.stringify(obj, null, 1);
+    const body = { message: '작업대 업데이트', content: b64enc(text) };
+    if (sha) body.sha = sha;
+    const res = await api(`${API}/repos/${cfg.repo}/contents/data.json`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, cfg.token);
+    if (res.status === 409 || res.status === 422) {
+      let msg = '';
+      try { msg = (await res.json()).message || ''; } catch { /* 본문이 없을 수 있다 */ }
+      if (res.status === 409 || /sha/i.test(msg)) return { conflict: true };
+      throw new WbError('http', `422 ${msg}`);
+    }
+    if (!res.ok) throw await fail(res);
+    const j = await res.json();
+    if (text.length > 900000 && !warnedSize) { warnedSize = true; toast('데이터가 1MB에 가까워졌어요. 오래된 항목을 정리해 주세요.'); }
+    return { sha: j.content.sha };
+  }
+
+  /* ---------- 동기화 ---------- */
+  let syncing = false, again = false, timer = null, lastSync = 0, blocked = false, repoChecked = false, lastErr = null;
+
+  function showStatus() {
+    if (syncing) return;
+    if (!cfg) { setStatus('wait', '연결 전'); return; }
+    if (queue.length) setStatus('wait', `저장 대기 ${queue.length}`);
+    else setStatus('ok', lastSync ? `동기화됨 ${hhmm(lastSync)}` : '연결됨');
+  }
+  function scheduleSync() { clearTimeout(timer); timer = setTimeout(sync, 700); }
+
+  async function syncOnce() {
+    if (!repoChecked) {
+      const m = await ghRepoMeta(cfg.repo, cfg.token);
+      if (!m.private) throw new WbError('public');
+      repoChecked = true;
+    }
+    const r = await ghGet();
+    if (!r.notModified) { remote = { sha: r.sha, etag: r.etag, data: r.data }; save(K.remote, remote); }
+    loaded = true;
+    if (queue.length === 0) {
+      if (!r.notModified) { data = view(); renderAll(); }
+      return;
+    }
+    const sent = queue.length;
+    const merged = clone(remote.data);
+    queue.slice(0, sent).forEach(op => applyOp(merged, op));
+    const res = await ghPut(merged, remote.sha);
+    if (res.conflict) { remote.etag = null; again = true; return; }   // 다른 기기가 먼저 저장했다. 다시 받아서 합친다.
+    remote = { sha: res.sha, etag: null, data: merged };
+    save(K.remote, remote);
+    queue.splice(0, sent);
+    save(K.queue, queue);
+    data = view();
+    renderAll();
+  }
+  async function sync() {
+    if (!cfg || blocked) return;
+    if (syncing) { again = true; return; }
+    syncing = true;
+    setStatus('sync', '동기화 중…');
+    try {
+      let guard = 0;
+      do { again = false; await syncOnce(); } while (again && ++guard < 5);
+      lastSync = Date.now();
+      lastErr = null;
+      syncing = false;
+      showStatus();
+    } catch (e) {
+      syncing = false;
+      onSyncError(e);
+    }
+    syncing = false;
+  }
+  function onSyncError(e) {
+    const kind = (e && e.kind) || 'http';
+    if (kind === 'net') { lastErr = null; setStatus('off', queue.length ? `오프라인 · 대기 ${queue.length}` : '오프라인'); return; }
+    setStatus('err', SHORT[kind] || SHORT.http);
+    if (lastErr !== kind) { lastErr = kind; toast(MSG[kind] || MSG.http); }
+    if (['auth', 'repo', 'perm', 'public'].includes(kind)) { blocked = true; openSetup(); }
+  }
+
+  /* ---------- 연결 설정 ---------- */
+  function hint(text, isErr) {
+    const h = $('#cfg-hint');
+    h.textContent = text || '';
+    h.classList.toggle('err', !!isErr);
+  }
+  function openSetup() {
+    $('#setup').hidden = false;
+    $('#cfg-repo').value = cfg ? cfg.repo : '';
+    $('#cfg-token').value = '';
+    $('#cfg-token').placeholder = cfg ? '바꾸려면 새 열쇠 (비워 두면 그대로)' : 'github_pat_…';
+    $('#cfg-clear').hidden = !cfg;
+    $('#cfg-close').hidden = !cfg;
+    $('#main').hidden = !cfg;
+    $('#setup').scrollIntoView({ block: 'start' });
+  }
+  function closeSetup() {
+    $('#setup').hidden = true;
+    $('#main').hidden = false;
+    hint('');
+  }
+  $('#open-setup').addEventListener('click', () => ($('#setup').hidden ? openSetup() : closeSetup()));
+  $('#cfg-close').addEventListener('click', closeSetup);
+  $('#sync').addEventListener('click', () => { if (!cfg || blocked) openSetup(); else sync(); });
+
+  $('#cfg-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const repo = $('#cfg-repo').value.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/+$/, '');
+    const token = $('#cfg-token').value.trim() || (cfg && cfg.token) || '';
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) { hint('저장소는 "계정/이름" 형식으로 적어 주세요.', true); return; }
+    if (!token) { hint('열쇠를 붙여 넣어 주세요.', true); return; }
+    const btn = $('#cfg-save');
+    btn.disabled = true;
+    hint('확인하는 중…');
+    try {
+      const m = await ghRepoMeta(repo, token);
+      if (!m.private) throw new WbError('public');
+    } catch (err) {
+      hint(MSG[err.kind] || MSG.http, true);
+      btn.disabled = false;
+      return;
+    }
+    btn.disabled = false;
+    if (!cfg || cfg.repo !== repo) {                        // 저장소가 바뀌면 이전 사본과 대기 중인 변경은 버린다
+      remote = { sha: null, etag: null, data: emptyData() };
+      queue = [];
+      loaded = false;
+      save(K.remote, null);
+      save(K.queue, []);
+      data = view();
+    }
+    cfg = { repo, token };
+    save(K.cfg, cfg);
+    blocked = false; repoChecked = true; lastErr = null;
+    closeSetup();
+    renderAll();
+    sync();
+  });
+
+  let clearArmed = false;
+  $('#cfg-clear').addEventListener('click', () => {
+    if (queue.length && !clearArmed) {
+      clearArmed = true;
+      toast(`아직 저장되지 않은 변경 ${queue.length}건이 사라져요. 한 번 더 누르면 지워요.`);
+      setTimeout(() => { clearArmed = false; }, 6000);
+      return;
+    }
+    cfg = null; remote = { sha: null, etag: null, data: emptyData() }; queue = []; loaded = false; blocked = false;
+    save(K.cfg, null); save(K.remote, null); save(K.queue, []);
+    data = view();
+    renderAll();
+    showStatus();
+    openSetup();
+  });
+
+  /* ---------- 렌더링 (수정 중에는 미뤘다가 한 번에) ---------- */
+  let editing = 0;
+  const pending = new Set();
+  const beginEdit = () => { editing++; };
+  const endEdit = () => { editing = Math.max(0, editing - 1); setTimeout(flush, 250); };
+  function flush() {
+    if (editing > 0) return;
+    const names = [...pending];
+    pending.clear();
+    names.forEach(n => R[n]());
+    if (names.length) renderHeader();
+  }
+  function render(name) {
+    if (editing > 0) { pending.add(name); return; }
+    R[name]();
+    renderHeader();
+  }
+  function renderAll() {
+    if (editing > 0) { Object.keys(R).forEach(n => pending.add(n)); return; }
+    Object.keys(R).forEach(n => R[n]());
+    renderHeader();
+  }
+
+  /* ---------- 공통 조각 ---------- */
+  const emptyState = msg => el('p', { class: 'empty' }, loaded ? msg : '불러오는 중…');
+  const delBtn = (c, item) => el('button', { type: 'button', class: 'btn quiet del', 'aria-label': '삭제', onclick: () => removeItem(c, item) }, '삭제');
+
+  function editable(text, onSave) {
+    const b = el('button', { type: 'button', class: 'title-btn', title: '눌러서 수정' }, text);
+    b.addEventListener('click', () => {
+      const inp = el('input', { type: 'text', class: 'inline', 'aria-label': '수정', maxlength: '160' });
+      inp.value = text;
+      let done = false;
+      beginEdit();
+      const finish = doSave => {
+        if (done) return;
+        done = true;
+        const v = inp.value.trim();
+        if (doSave && v && v !== text) { b.textContent = v; inp.replaceWith(b); onSave(v); }
+        else inp.replaceWith(b);
+        endEdit();
+      };
+      inp.addEventListener('keydown', ev => {
+        if (ev.key === 'Enter') { ev.preventDefault(); finish(true); }
+        else if (ev.key === 'Escape') finish(false);
+      });
+      inp.addEventListener('blur', () => finish(true));
+      b.replaceWith(inp);
+      inp.focus();
+      inp.select();
+    });
+    return b;
+  }
+  function linkify(text) {
+    const frag = document.createDocumentFragment();
+    const re = /https?:\/\/[^\s<>"']+/g;
+    let last = 0, m;
+    while ((m = re.exec(text))) {
+      if (m.index > last) frag.append(text.slice(last, m.index));
+      const url = m[0].replace(/[.,;:!?)\]]+$/, '');
+      frag.append(el('a', { href: url, target: '_blank', rel: 'noopener noreferrer' }, url));
+      if (url.length < m[0].length) frag.append(m[0].slice(url.length));
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) frag.append(text.slice(last));
+    return frag;
+  }
+  function normalizeUrl(raw) {
+    let s = raw.trim();
+    if (!s) return null;
+    if (!/^https?:\/\//i.test(s)) s = 'https://' + s;
+    try {
+      const u = new URL(s);
+      return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : null;
+    } catch { return null; }
+  }
+  const hostOf = url => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; } };
+
+  /* ---------- 상단 ---------- */
+  function renderHeader() {
+    const now = new Date();
+    $('#date-big').replaceChildren(`${now.getMonth() + 1}월 ${now.getDate()}일`, el('span', {}, `${DOW[now.getDay()]}요일`));
+    const sum = $('#summary');
+    if (!cfg) { sum.textContent = ''; return; }
+    if (!loaded) { sum.textContent = '불러오는 중…'; return; }
+    const today = todayStr();
+    const nEv = data.events.filter(e => e.date === today).length;
+    const open = data.tasks.filter(t => !t.done);
+    const overdue = open.filter(t => DATE_RE.test(t.due || '') && t.due < today).length;
+    const parts = ['오늘 일정 ', el('b', {}, nEv), '건 · 남은 할 일 ', el('b', {}, open.length), '개'];
+    if (overdue) parts.push(' · 기한 지남 ', el('b', { class: 'warn' }, overdue), '개');
+    sum.replaceChildren(...parts);
+  }
+
+  /* ---------- 일정 ---------- */
+  const evDate = e => (DATE_RE.test(e.date || '') ? e.date : todayStr());
+  const cmpEv = (a, b) => evDate(a).localeCompare(evDate(b)) || String(a.time || '').localeCompare(String(b.time || '')) || (a.createdAt || 0) - (b.createdAt || 0);
+  function renderEvents() {
+    const box = $('#events-list');
+    box.replaceChildren();
+    const today = todayStr();
+    const up = data.events.filter(e => evDate(e) >= today).sort(cmpEv);
+    const past = data.events.filter(e => evDate(e) < today).sort((a, b) => cmpEv(b, a));
+    $('#c-events').textContent = loaded ? `예정 ${up.length}` : '';
+    if (!up.length) box.append(emptyState('예정된 일정이 없어요. 위에서 날짜와 함께 추가해 보세요.'));
+    let cur = null;
+    up.forEach(e => {
+      const d = evDate(e);
+      if (d !== cur) {
+        cur = d;
+        box.append(el('div', { class: 'day-head' + (d === today ? ' today' : '') }, longDate(d), el('span', { class: 'rel' }, relLabel(d))));
+      }
+      box.append(el('div', { class: 'row' },
+        el('span', { class: 'time' }, e.time || '종일'),
+        editable(String(e.title || ''), v => update('events', e.id, { title: v })),
+        delBtn('events', e)));
+    });
+    if (past.length) {
+      box.append(el('details', {},
+        el('summary', {}, `지난 일정 ${past.length}개`),
+        past.map(e => el('div', { class: 'row' },
+          el('span', { class: 'time' }, `${parseYmd(evDate(e)).getMonth() + 1}/${parseYmd(evDate(e)).getDate()}`),
+          el('span', { class: 'title-btn', style: 'color:var(--muted);cursor:default' }, String(e.title || '')),
+          delBtn('events', e)))));
+    }
+  }
+
+  /* ---------- 할 일 ---------- */
+  const cmpTask = (a, b) => {
+    const ad = DATE_RE.test(a.due || '') ? a.due : '9999-99-99';
+    const bd = DATE_RE.test(b.due || '') ? b.due : '9999-99-99';
+    return ad.localeCompare(bd) || (a.createdAt || 0) - (b.createdAt || 0);
+  };
+  function dueChip(t) {
+    if (!DATE_RE.test(t.due || '')) return null;
+    const n = diffDays(t.due);
+    if (!t.done && n < 0) return el('span', { class: 'chip warn' }, `기한 지남 · ${shortDate(t.due)}`);
+    if (!t.done && n === 0) return el('span', { class: 'chip today' }, '오늘까지');
+    return el('span', { class: 'chip' }, shortDate(t.due));
+  }
+  function taskRow(t) {
+    const cb = el('input', { type: 'checkbox', 'aria-label': (t.done ? '완료 취소: ' : '완료: ') + String(t.title || '') });
+    cb.checked = !!t.done;
+    cb.addEventListener('change', () => update('tasks', t.id, { done: cb.checked, doneAt: cb.checked ? Date.now() : null }));
+    return el('div', { class: 'row task' + (t.done ? ' done' : '') },
+      cb,
+      editable(String(t.title || ''), v => update('tasks', t.id, { title: v })),
+      dueChip(t),
+      delBtn('tasks', t));
+  }
+  function renderTasks() {
+    const box = $('#tasks-list');
+    box.replaceChildren();
+    const open = data.tasks.filter(t => !t.done).sort(cmpTask);
+    const done = data.tasks.filter(t => t.done).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0));
+    $('#c-tasks').textContent = loaded ? `남은 일 ${open.length}` : '';
+    if (!open.length) box.append(emptyState('남은 할 일이 없어요.'));
+    open.forEach(t => box.append(taskRow(t)));
+    if (done.length) box.append(el('details', {}, el('summary', {}, `완료한 일 ${done.length}개`), done.map(taskRow)));
+  }
+
+  /* ---------- 메모 ---------- */
+  const cmpNote = (a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0);
+  function noteCard(n) {
+    const card = el('article', { class: 'note' + (n.pinned ? ' pinned' : '') });
+    const title = String(n.title || '');
+    const body = String(n.body || '');
+    const showView = () => {
+      card.replaceChildren(
+        title || n.pinned ? el('h3', {}, title, n.pinned ? el('span', { class: 'pin' }, '고정') : null) : null,
+        el('p', { class: 'body' }, linkify(body)),
+        el('div', { class: 'actions' },
+          el('button', { type: 'button', class: 'btn quiet', onclick: showEdit }, '수정'),
+          el('button', { type: 'button', class: 'btn quiet', onclick: () => update('notes', n.id, { pinned: !n.pinned }) }, n.pinned ? '고정 해제' : '고정'),
+          el('button', { type: 'button', class: 'btn quiet', onclick: async () => {
+            try { await navigator.clipboard.writeText(body); toast('복사했어요.'); }
+            catch { toast('복사하지 못했어요. 글을 직접 선택해 주세요.'); }
+          } }, '복사'),
+          delBtn('notes', n)));
+    };
+    const showEdit = () => {
+      beginEdit();
+      const ti = el('input', { type: 'text', 'aria-label': '메모 제목', maxlength: '120', placeholder: '제목 (선택)' });
+      ti.value = title;
+      const ta = el('textarea', { 'aria-label': '메모 내용', maxlength: '20000' });
+      ta.value = body;
+      const saveBtn = el('button', { type: 'button', class: 'btn small' }, '저장');
+      const cancelBtn = el('button', { type: 'button', class: 'btn ghost small' }, '취소');
+      const doSave = () => {
+        const b = ta.value.trim();
+        if (!b) { toast('내용을 입력해 주세요.'); return; }
+        update('notes', n.id, { title: ti.value.trim(), body: b, updatedAt: Date.now() });
+        endEdit();
+      };
+      saveBtn.addEventListener('click', doSave);
+      cancelBtn.addEventListener('click', () => { endEdit(); pending.add('notes'); });
+      ta.addEventListener('keydown', ev => { if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') { ev.preventDefault(); doSave(); } });
+      card.replaceChildren(el('div', { class: 'edit' }, ti, ta, el('div', { class: 'actions' }, saveBtn, cancelBtn)));
+      ta.focus();
+    };
+    showView();
+    return card;
+  }
+  function renderNotes() {
+    const box = $('#notes-list');
+    box.replaceChildren();
+    const list = data.notes.slice().sort(cmpNote);
+    $('#c-notes').textContent = loaded ? `${list.length}개` : '';
+    if (!list.length) box.append(emptyState('메모가 없어요. 컴퓨터 사이에 옮길 글이나 주소를 여기에 적어 두세요.'));
+    list.forEach(n => box.append(noteCard(n)));
+  }
+
+  /* ---------- 바로가기 ---------- */
+  function renderLinks() {
+    const box = $('#links-list');
+    box.replaceChildren();
+    $('#c-links').textContent = loaded ? `${data.links.length}개` : '';
+    if (!data.links.length) box.append(emptyState('자주 여는 폴더나 사이트 주소를 걸어 두세요.'));
+    data.links.slice().sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)).forEach(l => {
+      const url = normalizeUrl(String(l.url || ''));
+      box.append(el('div', { class: 'link' },
+        url
+          ? el('a', { href: url, target: '_blank', rel: 'noopener noreferrer' }, el('b', {}, String(l.label || hostOf(url))), el('small', {}, hostOf(url)))
+          : el('a', { href: '#', onclick: ev => ev.preventDefault() }, el('b', {}, String(l.label || ''))),
+        el('button', { type: 'button', 'aria-label': `${l.label || '바로가기'} 삭제`, onclick: () => removeItem('links', l) }, '×')));
+    });
+  }
+
+  const R = { events: renderEvents, tasks: renderTasks, notes: renderNotes, links: renderLinks };
+
+  /* ---------- 입력 폼 ---------- */
+  $('#ev-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const title = $('#ev-title').value.trim(), date = $('#ev-date').value, time = $('#ev-time').value;
+    if (!title || !date) return;
+    add('events', { title, date, time, createdAt: Date.now() });
+    $('#ev-title').value = ''; $('#ev-time').value = ''; $('#ev-title').focus();
+  });
+  $('#tk-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const title = $('#tk-title').value.trim(), due = $('#tk-due').value;
+    if (!title) return;
+    add('tasks', { title, done: false, due, createdAt: Date.now() });
+    $('#tk-title').value = ''; $('#tk-due').value = ''; $('#tk-title').focus();
+  });
+  const addNote = () => {
+    const title = $('#nt-title').value.trim(), body = $('#nt-body').value.trim();
+    if (!body) return;
+    const now = Date.now();
+    add('notes', { title, body, pinned: false, createdAt: now, updatedAt: now });
+    $('#nt-title').value = ''; $('#nt-body').value = ''; $('#nt-body').focus();
+  };
+  $('#nt-form').addEventListener('submit', e => { e.preventDefault(); addNote(); });
+  $('#nt-body').addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); addNote(); } });
+  $('#ln-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const label = $('#ln-label').value.trim(), url = normalizeUrl($('#ln-url').value);
+    if (!label) return;
+    if (!url) { toast('주소를 확인해 주세요. http:// 또는 https://로 시작하는 주소만 쓸 수 있어요.'); return; }
+    add('links', { label, url, createdAt: Date.now() });
+    $('#ln-label').value = ''; $('#ln-url').value = ''; $('#ln-label').focus();
+  });
+
+  /* ---------- 시작 ---------- */
+  let lastDay = todayStr();
+  $('#ev-date').value = lastDay;
+  renderAll();
+  showStatus();
+  if (!cfg) openSetup(); else sync();
+
+  setInterval(() => { if (!document.hidden && navigator.onLine !== false) sync(); }, 60000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { if (queue.length) sync(); }
+    else if (Date.now() - lastSync > 15000) sync();
+  });
+  window.addEventListener('online', () => sync());
+  window.addEventListener('offline', () => showStatus());
+  setInterval(() => {
+    const t = todayStr();
+    if (t !== lastDay) { lastDay = t; $('#ev-date').value = t; renderAll(); }
+  }, 60000);
+
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => { /* 설치 기능만 빠질 뿐 앱은 동작한다 */ });
+})();
+</script>
+</body>
+</html>
